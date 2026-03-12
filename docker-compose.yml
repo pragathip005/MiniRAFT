@@ -1,0 +1,63 @@
+version: "3.9"
+
+services:
+
+  gateway:
+    build: ./gateway
+    container_name: gateway
+    ports:
+      - "8080:8080"
+    networks:
+      - raft-net
+    volumes:
+      - ./gateway:/app
+      - /app/node_modules
+    
+  replica1:
+    build: ./replica1
+    container_name: replica1
+    environment:
+      - REPLICA_ID=1
+      - PORT=3001
+      - PEERS=http://replica2:3002,http://replica3:3003
+    ports:
+      - "3001:3001"
+    networks:
+      - raft-net
+    volumes:
+      - ./replica1:/app
+      - /app/node_modules
+
+  replica2:
+    build: ./replica2
+    container_name: replica2
+    environment:
+      - REPLICA_ID=2
+      - PORT=3002
+      - PEERS=http://replica1:3001,http://replica3:3003
+    ports:
+      - "3002:3002"
+    networks:
+      - raft-net
+    volumes:
+      - ./replica2:/app
+      - /app/node_modules
+
+  replica3:
+    build: ./replica3
+    container_name: replica3
+    environment:
+      - REPLICA_ID=3
+      - PORT=3003
+      - PEERS=http://replica1:3001,http://replica2:3002 
+    ports:
+      - "3003:3003"
+    networks:
+      - raft-net
+    volumes:
+      - ./replica3:/app
+      - /app/node_modules
+
+networks:
+  raft-net:
+    driver: bridge
