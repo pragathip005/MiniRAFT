@@ -1,5 +1,3 @@
-Copy
-
 # ── Stage: base image ────────────────────────────────────────────
 # node:18-alpine is a tiny Linux image (~50MB) with Node.js pre-installed.
 # "alpine" = Alpine Linux, chosen because it is much smaller than node:18

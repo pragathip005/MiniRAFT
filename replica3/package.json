@@ -1,7 +1,6 @@
 {
   "name": "raft-replica",
   "version": "1.0.0",
-  "description": "Mini-RAFT replica node",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
