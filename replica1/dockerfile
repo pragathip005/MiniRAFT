@@ -32,4 +32,4 @@ COPY . .
 # CMD is the default command. nodemon watches server.js for changes.
 # When you edit replica1/server.js on your laptop (bind mount),
 # nodemon sees the change and restarts the Node process automatically.
-CMD ["nodemon", "server.js"]
+CMD ["nodemon", "--legacy-watch", "server.js"]

@@ -66,7 +66,7 @@ function startHeartbeats() {
       return;
     }
     for (const peer of PEERS) {
-      axios.post(peer + '/heartbeat', { term: currentTerm, leaderId: REPLICA_ID });
+      axios.post(peer + '/heartbeat', { term: currentTerm, leaderId: REPLICA_ID }).catch(() => {});
     }
   }, 150);
 }
