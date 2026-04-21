@@ -19,17 +19,27 @@ function resetElectionTimer() {
   electionTimer = setTimeout(startElection, t);
 }
 
+// FIX 3: stepDown helper — clears heartbeat interval and resets to follower cleanly
+function stepDown(newTerm) {
+  currentTerm = newTerm;
+  state = 'follower';
+  votedFor = null;
+  clearInterval(heartbeatInterval);
+  resetElectionTimer();
+}
+
 app.get('/status', (req, res) => {
   res.json({ state, currentTerm, leaderId, logLength: log.length, commitIndex });
 });
 
 app.post('/request-vote', (req, res) => {
   const { term, candidateId } = req.body;
+
+  // FIX 3: use stepDown instead of manual state reset
   if (term > currentTerm) {
-    currentTerm = term;
-    state = 'follower';
-    votedFor = null;
+    stepDown(term);
   }
+
   let voteGranted = false;
   if (term === currentTerm && (votedFor === null || votedFor === candidateId)) {
     voteGranted = true;
@@ -74,11 +84,11 @@ function startHeartbeats() {
 app.post('/heartbeat', (req, res) => {
   const { term, leaderId: incomingLeaderId } = req.body;
   if (term >= currentTerm) {
-    currentTerm = term;
-    state = 'follower';
+    // FIX 3: use stepDown instead of manual state reset
+    stepDown(term);
     leaderId = incomingLeaderId;
-    leaderUrl = PEERS.find(p => p.includes(incomingLeaderId));
-    resetElectionTimer();
+    // FIX 1: use `replica${id}:` to avoid partial match (e.g. "3" matching "replica3" AND "replica13")
+    leaderUrl = PEERS.find(p => p.includes(`replica${incomingLeaderId}:`));
   }
   res.json({});
 });
@@ -88,19 +98,31 @@ app.post('/append-entries', async (req, res) => {
   if (term < currentTerm) {
     return res.json({ success: false, logLength: log.length });
   }
-  currentTerm = term;
-  state = 'follower';
-  resetElectionTimer();
+
+  // FIX 3: use stepDown instead of manual state reset
+  stepDown(term);
+
   if (entry) {
-    if (entry.index > log.length) {
-      try {
-        const res = await axios.get(leaderUrl + '/sync-log?from=' + log.length);
-        log.push(...res.data.entries);
-      } catch {}
+    const prevLogIndex = entry.index - 1;
+
+    // FIX 2: proper prevLogIndex check (spec-compliant gap detection)
+    if (prevLogIndex >= 0 && (log.length <= prevLogIndex || !log[prevLogIndex])) {
+      // Gap detected — catch up from leader
+      if (leaderUrl) {
+        try {
+          const syncRes = await axios.get(leaderUrl + '/sync-log?from=' + log.length);
+          log.push(...syncRes.data.entries);
+        } catch {}
+      }
+      return res.json({ success: false, logLength: log.length });
     } else {
-      log.push(entry);
+      // Normal append — idempotent: only push if not already present
+      if (log.length <= entry.index) {
+        log.push(entry);
+      }
     }
   }
+
   if (leaderCommit > commitIndex) {
     commitIndex = leaderCommit;
   }
@@ -127,11 +149,30 @@ app.post('/stroke', async (req, res) => {
   res.json({});
 });
 
+app.post('/clear', async (req, res) => {
+  if (state !== 'leader') return res.json({ error: 'not leader' });
+  const entry = { term: currentTerm, index: log.length, stroke: null }; // null = clear marker
+  log.push(entry);
+  let confirmations = 1;
+  for (const peer of PEERS) {
+    try {
+      const r = await axios.post(peer + '/append-entries', { term: currentTerm, entry, leaderCommit: commitIndex });
+      if (r.data.success) confirmations++;
+    } catch {}
+  }
+  if (confirmations >= 2) {
+    commitIndex = entry.index;
+    axios.post('http://gateway:8080/broadcast-clear', {});
+  }
+  res.json({});
+});
+
 app.get('/sync-log', (req, res) => {
   const fromIndex = parseInt(req.query.from || 0);
   res.json({ entries: log.slice(fromIndex), commitIndex });
 });
 
 app.listen(PORT, () => {
+  console.log(`Replica ${REPLICA_ID} started on port ${PORT}`);
   resetElectionTimer();
 });

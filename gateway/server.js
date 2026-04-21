@@ -73,9 +73,27 @@ wss.on('connection', (ws) => {
                 await discoverLeader();
             }
         }
+
+        if (data.type === 'clear') {
+            if (!currentLeader) {
+                await discoverLeader();
+            }
+            if (!currentLeader) {
+                ws.send(JSON.stringify({ type: 'error', code: 'NO_LEADER' }));
+                return;
+            }
+            try {
+                await axios.post(`${currentLeader}/clear`);
+            } catch (e) {
+                // leader died, find new one
+                currentLeader = null;
+                await discoverLeader();
+            }
+        }
     });
 });
 
+// Called by leader after a stroke is committed
 app.post('/broadcast', (req, res) => {
     const stroke = req.body;
     let clientsNotified = 0;
@@ -91,10 +109,28 @@ app.post('/broadcast', (req, res) => {
     res.json({ ok: true, clientsNotified });
 });
 
+// Called by leader after a clear is committed
+app.post('/broadcast-clear', (req, res) => {
+    let clientsNotified = 0;
+
+    for (const client of clients) {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'clear' }));
+            clientsNotified++;
+        }
+    }
+
+    console.log(`Broadcasted clear to ${clientsNotified} clients`);
+    res.json({ ok: true, clientsNotified });
+});
+
+// Called by new tabs on connect to replay committed log
+// null stroke entries = clear markers, replayed in order
 app.get('/canvas-state', async (req, res) => {
     for (const url of REPLICAS) {
         try {
             const result = await axios.get(`${url}/sync-log?from=0`, { timeout: 500 });
+            // Return all entries including null (clear) markers — frontend replays them in order
             const strokes = result.data.entries.map(entry => entry.stroke);
             return res.json({ strokes, count: strokes.length });
         } catch (e) {
